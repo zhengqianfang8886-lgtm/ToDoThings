@@ -1,0 +1,5 @@
+{
+  "name": "Things Pro Clone",
+  "description": "A high-fidelity task management application inspired by Things, featuring multi-view support (List, Kanban, Calendar), one-level subtasks, smooth animations, and advanced filtering.",
+  "requestFramePermissions": []
+}
