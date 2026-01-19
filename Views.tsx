@@ -3,7 +3,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   CheckCircle2, ChevronRight, X, Clock, Calendar as CalendarIcon,
-  Settings, Download, Upload, Plus, Copy, Edit3, Check, Trash, ChevronDown, Globe, Timer, BarChart, FileJson
+  Settings, Download, Upload, Plus, Copy, Edit3, Check, Trash, ChevronDown, Globe, Timer, BarChart, FileJson, Layers, Tag as TagIcon
 } from 'lucide-react';
 import { format, isToday, eachDayOfInterval, isSameDay, addMonths } from 'date-fns';
 import { Task, Priority, Tag, AppSettings, TaskTemplate } from './types';
@@ -11,6 +11,17 @@ import { PRIORITY_COLORS, COLORS, generateTagColor } from './constants';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, BarChart as ReBarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
 import { getProgressBgClass, getProgressColorClass, formatDuration } from './TaskComponents';
 import { getTranslation } from './locales';
+
+/**
+ * Hook to handle Escape key to close modals
+ */
+const useEscKey = (onClose: () => void) => {
+  useEffect(() => {
+    const handle = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', handle);
+    return () => window.removeEventListener('keydown', handle);
+  }, [onClose]);
+};
 
 const StyledSelect = ({ value, onChange, options, label, icon: Icon }: any) => {
   const [isOpen, setIsOpen] = useState(false);
@@ -43,7 +54,7 @@ const StyledSelect = ({ value, onChange, options, label, icon: Icon }: any) => {
   );
 };
 
-export const KanbanView = ({ tasks, language, onToggle, onDelete }: any) => {
+export const KanbanView = ({ tasks, language, onToggle, onDelete, onAddTask }: any) => {
   const t = getTranslation(language);
   return (
     <div className="flex space-x-6 h-full overflow-x-auto pb-6 scrollbar-hide">
@@ -52,8 +63,16 @@ export const KanbanView = ({ tasks, language, onToggle, onDelete }: any) => {
         return (
           <div key={p} className="w-72 flex-shrink-0 flex flex-col space-y-4">
             <div className="flex items-center justify-between px-2">
-              <h3 className="text-[11px] font-black uppercase text-things-secondary tracking-[0.2em]">{t[p]}</h3>
-              <span className="text-[10px] font-bold opacity-30 bg-things-border px-2 py-0.5 rounded-full">{pTasks.length}</span>
+              <div className="flex items-center space-x-2">
+                <h3 className="text-[11px] font-black uppercase text-things-secondary tracking-[0.2em]">{t[p]}</h3>
+                <span className="text-[10px] font-bold opacity-30 bg-things-border px-2 py-0.5 rounded-full">{pTasks.length}</span>
+              </div>
+              <button 
+                onClick={() => onAddTask(t.newTask, undefined, undefined, { priority: p })}
+                className="p-1 text-things-subtle hover:text-things-accent transition-colors"
+              >
+                <Plus size={14} />
+              </button>
             </div>
             <div className="flex-1 bg-things-lightSidebar/40 dark:bg-things-sidebar/40 rounded-apple-xl p-3 space-y-3 overflow-y-auto custom-scrollbar border border-things-lightBorder dark:border-things-border">
               {pTasks.map((tk: Task) => (
@@ -62,9 +81,17 @@ export const KanbanView = ({ tasks, language, onToggle, onDelete }: any) => {
                     <span className={`text-[13px] font-semibold leading-tight ${tk.completed ? 'line-through opacity-30' : ''}`}>{tk.title}</span>
                     <button onClick={() => onToggle(tk.id)} className={`transition-all duration-300 ${tk.completed ? 'text-things-success' : 'text-things-subtle opacity-40 hover:opacity-100'}`}><CheckCircle2 size={16}/></button>
                   </div>
-                  <div className="flex justify-end mt-2 opacity-0 group-hover:opacity-100 transition-opacity"><button onClick={() => onDelete(tk.id)} className="text-things-subtle hover:text-things-critical p-1"><Trash size={12}/></button></div>
+                  <div className="flex justify-end mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button onClick={() => onDelete(tk.id)} className="text-things-subtle hover:text-things-critical p-1"><Trash size={12}/></button>
+                  </div>
                 </div>
               ))}
+              {pTasks.length === 0 && (
+                <div className="py-12 flex flex-col items-center justify-center opacity-10 space-y-2">
+                  <Layers size={32} />
+                  <p className="text-[10px] font-black uppercase tracking-widest">{t.frequencyClear}</p>
+                </div>
+              )}
             </div>
           </div>
         );
@@ -195,6 +222,35 @@ export const TemplatesView = ({ templates, tags, language, onAdd, onUpdate, onDe
                 <div className="space-y-1.5"><label className="text-[10px] font-black uppercase opacity-40 ml-2 tracking-widest">{tStrings.taskTitle}</label><input value={editorState.title || ''} onChange={e => setEditorState({...editorState, title: e.target.value})} className="w-full bg-things-lightSidebar dark:bg-things-sidebar rounded-apple-md p-3.5 text-[13px] font-bold border border-things-lightBorder dark:border-things-border outline-none" /></div>
               </div>
               <StyledSelect label={tStrings.priority} value={editorState.priority} onChange={(v: Priority) => setEditorState({...editorState, priority: v})} options={[{value: Priority.LOW, label: tStrings.low}, {value: Priority.MEDIUM, label: tStrings.medium}, {value: Priority.HIGH, label: tStrings.high}]} />
+              
+              {/* Template Tag Editor */}
+              <div className="space-y-3 pt-2">
+                <label className="text-[10px] font-black uppercase opacity-40 ml-2 tracking-widest">{tStrings.tags}</label>
+                <div className="flex flex-wrap gap-2">
+                  {tags.map((tg: Tag) => {
+                    const isSelected = (editorState.tags || []).includes(tg.id);
+                    return (
+                      <button 
+                        key={tg.id}
+                        onClick={() => {
+                          const current = editorState.tags || [];
+                          const next = isSelected ? current.filter(id => id !== tg.id) : [...current, tg.id];
+                          setEditorState({...editorState, tags: next});
+                        }}
+                        className={`px-3 py-1.5 rounded-apple-sm text-[10px] font-black uppercase tracking-widest transition-all border ${isSelected ? 'shadow-apple-sm scale-105' : 'opacity-40 grayscale hover:grayscale-0 hover:opacity-100'}`}
+                        style={{ 
+                          color: tg.color, 
+                          backgroundColor: isSelected ? tg.color + '15' : 'transparent',
+                          borderColor: isSelected ? tg.color + '40' : 'transparent'
+                        }}
+                      >
+                        {tg.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
               <div className="flex justify-end space-x-3 pt-8"><button onClick={() => setEditorState(null)} className="text-[11px] font-black uppercase px-6 py-3 hover:bg-black/5 dark:hover:bg-things-hover rounded-apple-md">{tStrings.cancel}</button><button onClick={handleSave} className="bg-things-accent text-white px-8 py-3 rounded-apple-md font-black text-[11px] uppercase tracking-[0.2em] shadow-apple-md hover:brightness-110 transition-all">{tStrings.saveBlueprint}</button></div>
             </motion.div>
           </div>
@@ -208,21 +264,16 @@ export const SettingsModal = ({ settings, tags, onUpdateSettings, onExport, onIm
   const t = getTranslation(settings.language);
   const [local, setLocal] = useState({...settings});
   const fileInputRef = useRef<HTMLInputElement>(null);
+  useEscKey(onClose);
 
-  const handleImportClick = () => {
-    fileInputRef.current?.click();
-  };
-
+  const handleImportClick = () => { fileInputRef.current?.click(); };
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
     reader.onload = (event) => {
       const content = event.target?.result;
-      if (typeof content === 'string') {
-        onImport(content);
-        onClose();
-      }
+      if (typeof content === 'string') { onImport(content); onClose(); }
     };
     reader.readAsText(file);
   };
@@ -231,7 +282,6 @@ export const SettingsModal = ({ settings, tags, onUpdateSettings, onExport, onIm
     <div className="fixed inset-0 bg-black/60 backdrop-blur-md z-[110] flex items-center justify-center p-6">
       <motion.div initial={{ y: 30, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="bg-things-lightCard dark:bg-things-card w-full max-w-lg rounded-apple-2xl p-8 shadow-apple-lg flex flex-col max-h-[85vh] border border-things-border">
         <div className="flex justify-between items-center mb-8"><div className="flex items-center space-x-3 text-things-accent"><Settings size={22}/><h3 className="text-[17px] font-black tracking-tight">{t.settings}</h3></div><button onClick={onClose} className="p-2.5 hover:bg-black/5 dark:hover:bg-things-hover rounded-full transition-colors"><X size={18}/></button></div>
-        
         <div className="flex-1 overflow-y-auto custom-scrollbar space-y-10 pr-2">
           <section className="space-y-5">
             <h4 className="text-[11px] font-black uppercase opacity-30 tracking-[0.25em] ml-2">{t.profile}</h4>
@@ -240,44 +290,17 @@ export const SettingsModal = ({ settings, tags, onUpdateSettings, onExport, onIm
               <StyledSelect label={t.language} value={local.language} onChange={(v: string) => { const ns = {...local, language: v}; setLocal(ns); onUpdateSettings(ns); }} options={[{value:'en', label:'English'}, {value:'zh', label:'中文'}]} icon={Globe} />
             </div>
           </section>
-
           <section className="space-y-5 pt-6 border-t border-things-border/50">
             <h4 className="text-[11px] font-black uppercase opacity-30 tracking-[0.25em] ml-2">{t.dataManagement}</h4>
             <div className="grid grid-cols-2 gap-4">
-              <button 
-                onClick={() => onExport(tags)} 
-                className="flex items-center justify-center space-x-3 p-4 bg-things-lightSidebar dark:bg-things-sidebar hover:bg-black/5 dark:hover:bg-things-hover border border-things-lightBorder dark:border-things-border rounded-apple-md transition-all group"
-              >
-                <Download size={16} className="text-things-accent group-hover:scale-110 transition-transform" />
-                <span className="text-[12px] font-black uppercase tracking-widest">{t.export}</span>
-              </button>
-              <button 
-                onClick={handleImportClick} 
-                className="flex items-center justify-center space-x-3 p-4 bg-things-lightSidebar dark:bg-things-sidebar hover:bg-black/5 dark:hover:bg-things-hover border border-things-lightBorder dark:border-things-border rounded-apple-md transition-all group"
-              >
-                <Upload size={16} className="text-things-info group-hover:scale-110 transition-transform" />
-                <span className="text-[12px] font-black uppercase tracking-widest">{t.import}</span>
-              </button>
-              <input 
-                type="file" 
-                ref={fileInputRef} 
-                onChange={handleFileChange} 
-                className="hidden" 
-                accept=".json"
-              />
+              <button onClick={() => onExport(tags)} className="flex items-center justify-center space-x-3 p-4 bg-things-lightSidebar dark:bg-things-sidebar hover:bg-black/5 dark:hover:bg-things-hover border border-things-lightBorder dark:border-things-border rounded-apple-md transition-all group"><Download size={16} className="text-things-accent group-hover:scale-110 transition-transform" /><span className="text-[12px] font-black uppercase tracking-widest">{t.export}</span></button>
+              <button onClick={handleImportClick} className="flex items-center justify-center space-x-3 p-4 bg-things-lightSidebar dark:bg-things-sidebar hover:bg-black/5 dark:hover:bg-things-hover border border-things-lightBorder dark:border-things-border rounded-apple-md transition-all group"><Upload size={16} className="text-things-info group-hover:scale-110 transition-transform" /><span className="text-[12px] font-black uppercase tracking-widest">{t.import}</span></button>
+              <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" accept=".json" />
             </div>
           </section>
-
-          <section className="pt-6 border-t border-things-border/50">
-            <button onClick={onReset} className="w-full p-4 bg-things-critical/10 text-things-critical rounded-apple-md font-black uppercase text-[11px] tracking-widest hover:bg-things-critical hover:text-white transition-all">
-              {t.resetApp}
-            </button>
-          </section>
+          <section className="pt-6 border-t border-things-border/50"><button onClick={onReset} className="w-full p-4 bg-things-critical/10 text-things-critical rounded-apple-md font-black uppercase text-[11px] tracking-widest hover:bg-things-critical hover:text-white transition-all">{t.resetApp}</button></section>
         </div>
-        
-        <button onClick={onClose} className="mt-10 w-full py-4 bg-things-lightText dark:bg-things-text text-white dark:text-things-bg rounded-apple-md font-black text-[12px] uppercase tracking-[0.3em] shadow-apple-lg">
-          {t.done}
-        </button>
+        <button onClick={onClose} className="mt-10 w-full py-4 bg-things-lightText dark:bg-things-text text-white dark:text-things-bg rounded-apple-md font-black text-[12px] uppercase tracking-[0.3em] shadow-apple-lg">{t.done}</button>
       </motion.div>
     </div>
   );
@@ -286,13 +309,47 @@ export const SettingsModal = ({ settings, tags, onUpdateSettings, onExport, onIm
 export const TaskEditModal = ({ task, tags, language, onClose, onSave }: any) => {
   const [edited, setEdited] = useState({...task});
   const t = getTranslation(language);
+  useEscKey(onClose);
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-md z-[100] flex items-center justify-center p-6">
-      <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="bg-things-lightCard dark:bg-things-card w-full max-w-md rounded-apple-2xl p-8 shadow-apple-lg space-y-6 border border-things-border">
+      <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="bg-things-lightCard dark:bg-things-card w-full max-w-md rounded-apple-2xl p-8 shadow-apple-lg space-y-6 border border-things-border overflow-y-auto max-h-[90vh] custom-scrollbar">
         <h3 className="text-[11px] font-black uppercase tracking-[0.25em] text-things-critical">{t.editEntry}</h3>
-        <input value={edited.title} onChange={e => setEdited({...edited, title: e.target.value})} className="w-full text-xl font-bold bg-transparent outline-none text-things-lightText dark:text-things-text" placeholder={t.taskTitle} />
-        <textarea value={edited.description || ''} onChange={e => setEdited({...edited, description: e.target.value})} className="w-full bg-things-lightSidebar dark:bg-things-sidebar rounded-apple-md p-4 text-[13px] border border-things-lightBorder dark:border-things-border min-h-[100px] outline-none text-things-lightText dark:text-things-text" placeholder={t.notes} />
+        <input value={edited.title} onChange={e => setEdited({...edited, title: e.target.value})} className="w-full text-xl font-bold bg-transparent outline-none text-things-lightText dark:text-things-text border-b border-transparent focus:border-things-accent/20 pb-2" placeholder={t.taskTitle} />
+        <textarea value={edited.description || ''} onChange={e => setEdited({...edited, description: e.target.value})} className="w-full bg-things-lightSidebar dark:bg-things-sidebar rounded-apple-md p-4 text-[13px] border border-things-lightBorder dark:border-things-border min-h-[100px] outline-none text-things-lightText dark:text-things-text focus:border-things-accent/40" placeholder={t.notes} />
         <StyledSelect label={t.priority} value={edited.priority} onChange={(v: Priority) => setEdited({...edited, priority: v})} options={[{value: Priority.LOW, label: t.low}, {value: Priority.MEDIUM, label: t.medium}, {value: Priority.HIGH, label: t.high}]} />
+        
+        {/* Task Tag Selector */}
+        <div className="space-y-3 pt-2">
+          <label className="text-[10px] font-black uppercase opacity-40 ml-2 tracking-widest">{t.tags}</label>
+          <div className="flex flex-wrap gap-2">
+            {tags.map((tg: Tag) => {
+              const isSelected = edited.tags.includes(tg.id);
+              return (
+                <button 
+                  key={tg.id}
+                  onClick={() => {
+                    const next = isSelected 
+                      ? edited.tags.filter((id: string) => id !== tg.id) 
+                      : [...edited.tags, tg.id];
+                    setEdited({...edited, tags: next});
+                  }}
+                  className={`px-3 py-1.5 rounded-apple-sm text-[10px] font-black uppercase tracking-widest transition-all border ${isSelected ? 'shadow-apple-sm scale-105' : 'opacity-40 grayscale hover:grayscale-0 hover:opacity-100'}`}
+                  style={{ 
+                    color: tg.color, 
+                    backgroundColor: isSelected ? tg.color + '15' : 'transparent',
+                    borderColor: isSelected ? tg.color + '40' : 'transparent'
+                  }}
+                >
+                  {tg.name}
+                </button>
+              );
+            })}
+            {tags.length === 0 && (
+              <p className="text-[11px] font-bold text-things-subtle italic opacity-50 px-2">{t.noBlueprints}</p>
+            )}
+          </div>
+        </div>
+
         <div className="flex justify-end space-x-3 pt-6 border-t border-things-border/50"><button onClick={onClose} className="text-[11px] font-black uppercase px-6 py-3 hover:bg-black/5 dark:hover:bg-things-hover rounded-apple-md">{t.abort}</button><button onClick={() => onSave(edited)} className="bg-things-accent text-white px-8 py-3 rounded-apple-md font-black text-[11px] uppercase tracking-[0.2em] shadow-apple-md">{t.commit}</button></div>
       </motion.div>
     </div>
@@ -303,15 +360,8 @@ export const TagManagementModal = ({ tags, language, onClose, onUpdate }: any) =
   const [local, setLocal] = useState([...tags]);
   const t = getTranslation(language);
   const isDarkMode = document.documentElement.classList.contains('dark');
-
-  // Refresh local colors if theme changes while modal is open (re-generates HSL based on isDarkMode)
-  useEffect(() => {
-    setLocal(prev => prev.map(tag => ({
-      ...tag,
-      color: generateTagColor(tag.id, isDarkMode)
-    })));
-  }, [isDarkMode]);
-
+  useEscKey(onClose);
+  useEffect(() => { setLocal(prev => prev.map(tag => ({ ...tag, color: generateTagColor(tag.id, isDarkMode) }))); }, [isDarkMode]);
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-md z-[100] flex items-center justify-center p-6">
       <motion.div initial={{ y: 30, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="bg-things-lightCard dark:bg-things-card w-full max-w-sm rounded-apple-2xl p-8 shadow-apple-lg space-y-6 border border-things-border">
@@ -320,28 +370,11 @@ export const TagManagementModal = ({ tags, language, onClose, onUpdate }: any) =
           {local.map((tag, idx) => (
             <div key={tag.id} className="flex items-center space-x-3 bg-things-lightSidebar dark:bg-things-sidebar p-2.5 rounded-apple-md border border-things-lightBorder dark:border-things-border group/item transition-all hover:border-things-accent/30">
               <div className="w-3.5 h-3.5 rounded-full shadow-sm transition-transform group-hover/item:scale-125" style={{ backgroundColor: tag.color }} />
-              <input 
-                value={tag.name} 
-                onChange={e => { const n = [...local]; n[idx].name = e.target.value; setLocal(n); }} 
-                className="bg-transparent border-none flex-1 text-[13px] font-bold outline-none text-things-lightText dark:text-things-text" 
-              />
+              <input value={tag.name} onChange={e => { const n = [...local]; n[idx].name = e.target.value; setLocal(n); }} className="bg-transparent border-none flex-1 text-[13px] font-bold outline-none text-things-lightText dark:text-things-text" />
               <button onClick={() => setLocal(local.filter(tg => tg.id !== tag.id))} className="text-things-subtle hover:text-things-critical p-1.5 transition-colors opacity-0 group-hover/item:opacity-100"><Trash size={14}/></button>
             </div>
           ))}
-          <button 
-            onClick={() => {
-              const newId = Math.random().toString(36).substr(2, 9);
-              setLocal([...local, { 
-                id: newId, 
-                name: 'New Tag', 
-                color: generateTagColor(newId, isDarkMode) 
-              }]);
-            }} 
-            className="w-full border-2 border-dashed border-things-border py-4 rounded-apple-md text-[10px] font-black uppercase opacity-40 hover:opacity-100 hover:border-things-accent/50 transition-all flex items-center justify-center space-x-2"
-          >
-            <Plus size={14}/>
-            <span>{t.newTask}</span>
-          </button>
+          <button onClick={() => { const newId = Math.random().toString(36).substr(2, 9); setLocal([...local, { id: newId, name: 'New Tag', color: generateTagColor(newId, isDarkMode) }]); }} className="w-full border-2 border-dashed border-things-border py-4 rounded-apple-md text-[10px] font-black uppercase opacity-40 hover:opacity-100 hover:border-things-accent/50 transition-all flex items-center justify-center space-x-2"><Plus size={14}/><span>{t.newTask}</span></button>
         </div>
         <button onClick={() => { onUpdate(local); onClose(); }} className="w-full bg-things-info text-white py-4 rounded-apple-md font-black text-[12px] uppercase tracking-[0.3em] shadow-apple-md hover:brightness-110 active:scale-[0.98] transition-all">{t.save}</button>
       </motion.div>

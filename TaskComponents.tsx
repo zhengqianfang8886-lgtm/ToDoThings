@@ -1,7 +1,8 @@
+
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
-  ChevronRight, Trash2, Edit3, Plus, Clock, Flag, Check, Star, Play, Pause, Timer
+  ChevronRight, Trash2, Edit3, Plus, Clock, Flag, Check, Star, Play, Pause, Timer, Tag as TagIcon
 } from 'lucide-react';
 import { format, isPast, isToday } from 'date-fns';
 import { Task, Priority, Tag } from './types';
@@ -107,6 +108,9 @@ export const TaskCard: React.FC<TaskCardProps> = ({
   const completedChildren = childTasks.filter(c => c.completed).length;
   const progressPercent = childTasks.length > 0 ? (completedChildren / childTasks.length) * 100 : 0;
 
+  // Resolve tag names and colors
+  const assignedTags = task.tags.map(tid => tags.find(tg => tg.id === tid)).filter(Boolean) as Tag[];
+
   return (
     <motion.div 
       layout
@@ -155,25 +159,40 @@ export const TaskCard: React.FC<TaskCardProps> = ({
               </div>
             </div>
             
-            <div className="flex items-center mt-1.5 space-x-4">
+            <div className="flex items-center mt-1.5 space-x-3 overflow-hidden">
               <button 
                 onClick={(e) => { e.stopPropagation(); const order = [Priority.LOW, Priority.MEDIUM, Priority.HIGH]; onUpdateTask({...task, priority: order[(order.indexOf(task.priority) + 1) % 3]}); }}
-                className="flex items-center space-x-1.5 px-2 py-0.5 rounded-apple-sm text-[10px] font-black uppercase tracking-wider transition-all hover:brightness-110"
+                className="flex items-center space-x-1.5 px-2 py-0.5 rounded-apple-sm text-[10px] font-black uppercase tracking-wider transition-all hover:brightness-110 flex-shrink-0"
                 style={{ color: PRIORITY_COLORS[task.priority], backgroundColor: PRIORITY_COLORS[task.priority] + '15' }}
               >
                 <Flag size={10} fill={task.priority === Priority.HIGH ? 'currentColor' : 'none'} />
                 <span>{tStrings[task.priority]}</span>
               </button>
 
+              {/* Tag Display */}
+              {assignedTags.length > 0 && (
+                <div className="flex items-center space-x-1.5 overflow-hidden">
+                  {assignedTags.map(tg => (
+                    <div 
+                      key={tg.id} 
+                      className="px-2 py-0.5 rounded-apple-sm text-[9px] font-black uppercase tracking-widest truncate max-w-[80px]" 
+                      style={{ color: tg.color, backgroundColor: tg.color + '15' }}
+                    >
+                      {tg.name}
+                    </div>
+                  ))}
+                </div>
+              )}
+
               {task.dueDate && (
-                <span className={`text-[10px] font-bold uppercase tracking-widest flex items-center ${isOverdue ? 'text-things-critical' : 'text-things-subtle opacity-70'}`}>
+                <span className={`text-[10px] font-bold uppercase tracking-widest flex items-center flex-shrink-0 ${isOverdue ? 'text-things-critical' : 'text-things-subtle opacity-70'}`}>
                   <Clock size={11} className="mr-1.5" />
                   {format(new Date(task.dueDate), 'MMM d')}
                 </span>
               )}
 
               {(currentTime > 0 || task.timerStartedAt) && (
-                <span className={`text-[10px] font-bold uppercase tracking-widest flex items-center ${task.timerStartedAt ? 'text-things-accent' : 'text-things-subtle opacity-50'}`}>
+                <span className={`text-[10px] font-bold uppercase tracking-widest flex items-center flex-shrink-0 ${task.timerStartedAt ? 'text-things-accent' : 'text-things-subtle opacity-50'}`}>
                   <Timer size={11} className={`mr-1.5 ${task.timerStartedAt ? 'animate-spin-slow' : ''}`} />
                   {formatDuration(currentTime)}
                 </span>

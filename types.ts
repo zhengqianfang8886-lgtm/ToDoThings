@@ -69,6 +69,7 @@ export interface AppBackup {
   tasks: Task[];
   tags: Tag[];
   templates: TaskTemplate[];
+  projects: Project[];
   settings: AppSettings;
   version: string;
 }

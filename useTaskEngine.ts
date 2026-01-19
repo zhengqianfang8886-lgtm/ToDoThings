@@ -1,6 +1,6 @@
 
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { Task, Priority, ViewMode, AppSettings, AppBackup, Tag, TaskTemplate } from './types';
+import { Task, Priority, ViewMode, AppSettings, AppBackup, Tag, TaskTemplate, Project } from './types';
 import { isToday } from 'date-fns';
 import { autoSave, initBridge, loadData } from './bridge';
 import { INITIAL_TAGS } from './constants';
@@ -19,6 +19,7 @@ export function useTaskEngine() {
   const [isLoaded, setIsLoaded] = useState(false);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [tags, setTags] = useState<Tag[]>(INITIAL_TAGS);
+  const [projects, setProjects] = useState<Project[]>([]);
   const [templates, setTemplates] = useState<TaskTemplate[]>([]);
   const [settings, setSettings] = useState<AppSettings>(INITIAL_SETTINGS);
   
@@ -30,57 +31,48 @@ export function useTaskEngine() {
   const [activeView, setActiveView] = useState<ViewMode>(ViewMode.LIST);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [isTodayView, setIsTodayView] = useState(false);
   const [isLogbookView, setIsLogbookView] = useState(false);
 
   // 1. Initial Load Sequence
   useEffect(() => {
     const initialize = async () => {
-      // Establish connection
       await initBridge();
-
-      // Fetch data from bridge or local
       const saved = await loadData(BACKUP_KEY);
 
       if (saved) {
         if (saved.tasks) setTasks(saved.tasks);
         if (saved.tags) setTags(saved.tags);
+        if (saved.projects) setProjects(saved.projects);
         if (saved.templates) setTemplates(saved.templates);
         if (saved.settings) setSettings({ ...INITIAL_SETTINGS, ...saved.settings });
       } else {
-        // Fallback for first-time usage if loadData returns null
         const legacyTasks = localStorage.getItem('things-tasks-v4');
         if (legacyTasks) setTasks(JSON.parse(legacyTasks));
-        const legacyTemplates = localStorage.getItem('things-templates-v1');
-        if (legacyTemplates) setTemplates(JSON.parse(legacyTemplates));
       }
-      
       setIsLoaded(true);
     };
-
     initialize();
   }, []);
 
   // 2. Persistent Saving
   useEffect(() => {
-    // IMPORTANT: Only save if data has been loaded to avoid overwriting with empty defaults
     if (!isLoaded) return;
-
     const dataToSave = {
       tasks,
       tags,
+      projects,
       templates,
       settings,
-      version: '1.0.0'
+      version: '1.1.0'
     };
-
     autoSave(BACKUP_KEY, dataToSave);
     
-    // Compatibility keys
     localStorage.setItem('things-theme', isDarkMode ? 'dark' : 'light');
     if (isDarkMode) document.documentElement.classList.add('dark');
     else document.documentElement.classList.remove('dark');
-  }, [tasks, tags, templates, settings, isDarkMode, isLoaded]);
+  }, [tasks, tags, projects, templates, settings, isDarkMode, isLoaded]);
 
   const addTask = useCallback((title: string, parentId?: string, dueDate?: string, extra?: Partial<Task>) => {
     const id = Math.random().toString(36).substr(2, 9);
@@ -108,8 +100,13 @@ export function useTaskEngine() {
       }
       return next;
     });
+
+    if (selectedProjectId && !parentId) {
+      setProjects(prev => prev.map(p => p.id === selectedProjectId ? { ...p, taskIds: [...p.taskIds, id] } : p));
+    }
+
     return id;
-  }, [settings.defaultPriority, isTodayView, selectedTag]);
+  }, [settings.defaultPriority, isTodayView, selectedTag, selectedProjectId]);
 
   const updateTask = useCallback((updated: Task) => {
     setTasks(prev => prev.map(t => t.id === updated.id ? updated : t));
@@ -139,22 +136,20 @@ export function useTaskEngine() {
   }, []);
 
   const toggleTimer = useCallback((id: string) => {
-    setTasks(prev => {
-      return prev.map(t => {
-        if (t.id === id) {
-          if (t.timerStartedAt) {
-            const elapsed = Math.floor((new Date().getTime() - new Date(t.timerStartedAt).getTime()) / 1000);
-            return { ...t, timeSpent: t.timeSpent + elapsed, timerStartedAt: undefined };
-          } else {
-            return { ...t, timerStartedAt: new Date().toISOString() };
-          }
-        } else if (t.timerStartedAt) {
+    setTasks(prev => prev.map(t => {
+      if (t.id === id) {
+        if (t.timerStartedAt) {
           const elapsed = Math.floor((new Date().getTime() - new Date(t.timerStartedAt).getTime()) / 1000);
           return { ...t, timeSpent: t.timeSpent + elapsed, timerStartedAt: undefined };
+        } else {
+          return { ...t, timerStartedAt: new Date().toISOString() };
         }
-        return t;
-      });
-    });
+      } else if (t.timerStartedAt) {
+        const elapsed = Math.floor((new Date().getTime() - new Date(t.timerStartedAt).getTime()) / 1000);
+        return { ...t, timeSpent: t.timeSpent + elapsed, timerStartedAt: undefined };
+      }
+      return t;
+    }));
   }, []);
 
   const deleteTask = useCallback((id: string) => {
@@ -164,20 +159,54 @@ export function useTaskEngine() {
       if (target) target.subtaskIds.forEach(sid => toDelete.add(sid));
       return prev.filter(t => !toDelete.has(t.id));
     });
+    setProjects(prev => prev.map(p => ({ ...p, taskIds: p.taskIds.filter(tid => tid !== id) })));
   }, []);
 
-  const addTemplate = useCallback((template: Partial<TaskTemplate>) => {
-    const id = Math.random().toString(36).substr(2, 9);
-    const newTemplate: TaskTemplate = {
-      id,
-      name: template.name || 'New Template',
-      title: template.title || 'Task Title',
-      description: template.description || '',
-      priority: template.priority || Priority.MEDIUM,
-      tags: template.tags || [],
-      subtasks: template.subtasks || []
-    };
+  const addProject = useCallback((name: string) => {
+    const id = `project-${Math.random().toString(36).substr(2, 5)}`;
+    setProjects(prev => [...prev, { id, name, color: '#4C8DFF', taskIds: [] }]);
+    return id;
+  }, []);
+
+  const deleteProject = useCallback((id: string) => {
+    setProjects(prev => prev.filter(p => p.id !== id));
+    if (selectedProjectId === id) setSelectedProjectId(null);
+  }, [selectedProjectId]);
+
+  const filteredTasks = useMemo(() => {
+    const query = searchQuery.toLowerCase();
+    const tagMap = new Map(tags.map(tg => [tg.id, tg.name.toLowerCase()]));
+
+    return tasks.filter(t => {
+      if (t.parentId) return false;
+
+      // Project filter
+      if (selectedProjectId) {
+        const project = projects.find(p => p.id === selectedProjectId);
+        if (!project || !project.taskIds.includes(t.id)) return false;
+      }
+
+      // Deep Search (Title + Description + Tag names)
+      const taskTagNames = t.tags.map(tid => tagMap.get(tid) || '').join(' ');
+      const matchesSearch = !query || 
+        t.title.toLowerCase().includes(query) || 
+        (t.description || '').toLowerCase().includes(query) ||
+        taskTagNames.includes(query);
+
+      const matchesTag = !selectedTag || t.tags.includes(selectedTag);
+      const matchesToday = !isTodayView || (t.dueDate ? isToday(new Date(t.dueDate)) : false);
+
+      if (isLogbookView) return t.completed && matchesSearch && matchesTag;
+      return !t.completed && matchesSearch && matchesTag && matchesToday;
+    });
+  }, [tasks, searchQuery, selectedTag, selectedProjectId, isTodayView, isLogbookView, projects, tags]);
+
+  // Fixed missing template management functions
+  const addTemplate = useCallback((template: Omit<TaskTemplate, 'id'>) => {
+    const id = `template-${Math.random().toString(36).substr(2, 9)}`;
+    const newTemplate = { ...template, id } as TaskTemplate;
     setTemplates(prev => [...prev, newTemplate]);
+    return id;
   }, []);
 
   const updateTemplate = useCallback((updated: TaskTemplate) => {
@@ -199,21 +228,11 @@ export function useTaskEngine() {
     if (template.subtasks) template.subtasks.forEach(sub => addTask(sub.title, parentId));
   }, [templates, addTask]);
 
-  const filteredTasks = useMemo(() => {
-    return tasks.filter(t => {
-      if (t.parentId) return false;
-      const matchesSearch = t.title.toLowerCase().includes(searchQuery.toLowerCase());
-      const matchesTag = !selectedTag || t.tags.includes(selectedTag);
-      const matchesToday = !isTodayView || (t.dueDate ? isToday(new Date(t.dueDate)) : false);
-      if (isLogbookView) return t.completed && matchesSearch && matchesTag;
-      return !t.completed && matchesSearch && matchesTag && matchesToday;
-    });
-  }, [tasks, searchQuery, selectedTag, isTodayView, isLogbookView]);
-
   return {
     isLoaded,
     tasks, setTasks,
     tags, setTags,
+    projects, setProjects,
     templates, setTemplates,
     settings, setSettings,
     filteredTasks,
@@ -221,19 +240,14 @@ export function useTaskEngine() {
     activeView, setActiveView,
     searchQuery, setSearchQuery,
     selectedTag, setSelectedTag,
+    selectedProjectId, setSelectedProjectId,
     isTodayView, setIsTodayView,
     isLogbookView, setIsLogbookView,
     addTask, updateTask, toggleTask, toggleTimer, deleteTask,
-    addTemplate, updateTemplate, deleteTemplate,
-    useTemplate,
+    addProject, deleteProject,
+    addTemplate, updateTemplate, deleteTemplate, useTemplate,
     exportData: useCallback(() => {
-      const data: AppBackup = {
-        tasks,
-        tags,
-        templates,
-        settings,
-        version: '1.0.0'
-      };
+      const data: AppBackup = { tasks, tags, templates, settings, projects, version: '1.1.0' };
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -241,21 +255,21 @@ export function useTaskEngine() {
       a.download = `things-pro-backup-${new Date().toISOString().split('T')[0]}.json`;
       a.click();
       URL.revokeObjectURL(url);
-    }, [tasks, tags, templates, settings]),
+    }, [tasks, tags, templates, settings, projects]),
     importData: useCallback((json: string) => {
       try {
-        const data: AppBackup = JSON.parse(json);
+        const data: any = JSON.parse(json);
         if (data.tasks) setTasks(data.tasks);
         if (data.tags) setTags(data.tags);
+        if (data.projects) setProjects(data.projects);
         if (data.templates) setTemplates(data.templates);
         if (data.settings) setSettings(data.settings);
-      } catch (e) {
-        console.error('Import failed', e);
-      }
+      } catch (e) { console.error('Import failed', e); }
     }, []),
     resetAllData: useCallback(() => {
-      if (window.confirm('Reset all data? This cannot be undone.')) {
+      if (window.confirm('Reset all data?')) {
         setTasks([]);
+        setProjects([]);
         setTemplates([]);
         setSettings(INITIAL_SETTINGS);
         localStorage.clear();
